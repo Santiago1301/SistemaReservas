@@ -1,0 +1,19 @@
+# Secretos: nunca deben llegar al repositorio
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+
+# Salidas temporales de las pruebas de scraping
+pruebas/scraping/salidas*/
+
+# macOS
+.DS_Store
