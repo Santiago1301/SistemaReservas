@@ -1,6 +1,6 @@
 # Documento técnico de arquitectura — WanderSync Travel Solutions
 
-**Asignatura:** Patrones Arquitectónicos Avanzados · **Evaluación:** Parcial práctico del segundo corte
+**Asignatura:** Patrones Arquitectónicos Avanzados · **Evaluación:** Parcial práctico del segundo corte ·
 **Autor:** Santiago Rodríguez · **Repositorio:** https://github.com/Santiago1301/SistemaReservas
 
 ## 1. Resumen
@@ -63,12 +63,14 @@ flowchart TB
   GW -- "crear y consultar órdenes" --> OR
   OR -- "lanza la SAGA" --> PS
   PS <--> FL
-  FL -- "pasos y compensaciones" --> VU & HO & AU & OR
+  FL -- "pasos y compensaciones<br/>de la SAGA" --> OR
+  FL --> VU & HO & AU
   VU & HO & AU & OR -- "SQL" --> DB
   FL -- "tareas de ingesta" --> DS
   DS --> W1 & W2
   W1 & W2 --> GF & GH & FA
-  W1 & W2 -- "carga (upsert)" --> DB
+  W1 -- "carga (upsert)" --> DB
+  W2 --> DB
 ```
 
 ### 2.1 Contenedores
