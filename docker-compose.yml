@@ -1,0 +1,162 @@
+name: wandersync
+
+# Bloque reutilizable: los tres servicios de abajo usan la misma imagen.
+x-flujos: &flujos
+  build: ./flujos
+  image: wandersync-flujos
+
+# Bloque reutilizable: los microservicios de reservas comparten configuración.
+# Cada uno recibe solo la conexión a la base, no las demás claves del .env.
+x-servicio: &servicio
+  environment:
+    SUPABASE_DB_URL: ${SUPABASE_DB_URL:?falta SUPABASE_DB_URL en .env}
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+
+services:
+  # Panel y API de Prefect: registra cada flow, tarea, reintento y estado.
+  prefect-server:
+    <<: *flujos
+    command: prefect server start --host 0.0.0.0
+    environment:
+      PREFECT_UI_API_URL: http://localhost:4200/api
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect-datos:/root/.prefect
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Coordinador de Dask: recibe las tareas y las reparte entre los workers.
+  dask-scheduler:
+    <<: *flujos
+    command: dask scheduler
+    ports:
+      - "8787:8787"
+
+  # Workers de Dask: ejecutan el scraping. Cada uno abre un navegador a la vez.
+  dask-worker:
+    <<: *flujos
+    command: dask worker tcp://dask-scheduler:8786 --nthreads 1 --memory-limit 1GiB
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      FUENTE_AUTOS_URL: http://fuente-autos:8000
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL:?falta SUPABASE_DB_URL en .env}
+    shm_size: "1gb"
+    depends_on:
+      dask-scheduler:
+        condition: service_started
+      prefect-server:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+
+  # Almacén en memoria para las sesiones y los contadores de límite de peticiones.
+  # No expone puerto: solo el gateway lo alcanza por la red interna.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # API Gateway GraphQL (Apollo Server): única puerta de entrada del frontend.
+  gateway:
+    build: ./gateway
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?falta SUPABASE_URL en .env}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?falta SUPABASE_SECRET_KEY en .env}
+      SESSION_SECRET: ${SESSION_SECRET:?falta SESSION_SECRET en .env}
+    ports:
+      - "4000:4000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      ordenes:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # Interfaz web (React compilado, servido por nginx). Solo habla con el gateway.
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  # --- Microservicios de reservas (FastAPI) ---
+  vuelos:
+    <<: *servicio
+    build: ./servicios/vuelos
+    ports:
+      - "8001:8000"
+
+  hoteles:
+    <<: *servicio
+    build: ./servicios/hoteles
+    ports:
+      - "8002:8000"
+
+  autos:
+    <<: *servicio
+    build: ./servicios/autos
+    ports:
+      - "8003:8000"
+
+  ordenes:
+    <<: *servicio
+    build: ./servicios/ordenes
+    environment:
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL:?falta SUPABASE_DB_URL en .env}
+      PREFECT_API_URL: http://prefect-server:4200/api
+    ports:
+      - "8004:8000"
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+
+  # Registra los flujos en Prefect y los ejecuta cuando toca (programados o a mano).
+  # El flow corre aquí; sus tareas se envían a los workers de Dask.
+  flujos:
+    <<: *flujos
+    command: python servir.py
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      INGESTA_PAUSADA: ${INGESTA_PAUSADA:-false}
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+      dask-scheduler:
+        condition: service_started
+
+  # Sitio simulado de alquiler de autos que scrapea la ingesta.
+  # Falla y se demora a propósito para ejercitar los reintentos de Prefect.
+  fuente-autos:
+    build: ./servicios/fuente-autos
+    environment:
+      TASA_FALLO: "0.3"
+      LATENCIA_MAX_S: "2"
+    ports:
+      - "8010:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  prefect-datos:

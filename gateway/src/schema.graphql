@@ -1,0 +1,139 @@
+# WanderSync — contrato GraphQL único entre el frontend y el backend.
+# El catálogo se lee del GraphQL nativo de Supabase (pg_graphql); las reservas
+# se delegan al servicio de órdenes, que dispara la SAGA en Prefect.
+
+"Fecha de calendario ISO-8601, p. ej. 2026-11-06"
+scalar Date
+"Instante ISO-8601 con zona horaria"
+scalar DateTime
+
+type Vuelo {
+  id: ID!
+  origen: String!
+  destino: String!
+  fechaSalida: Date!
+  horaSalida: String!
+  horaLlegada: String!
+  aerolinea: String!
+  duracionMin: Int
+  escalas: Int!
+  "Precio por persona y por trayecto."
+  precioCop: Int!
+  cuposDisponibles: Int!
+}
+
+type Hotel {
+  id: ID!
+  nombre: String!
+  ciudad: String!
+  estrellas: Int
+  puntuacion: Float
+  precioNocheCop: Int!
+  servicios: [String!]!
+  habitacionesDisponibles: Int!
+}
+
+type Auto {
+  id: ID!
+  ciudad: String!
+  proveedor: String!
+  modelo: String!
+  categoria: String!
+  precioDiaCop: Int!
+  unidadesDisponibles: Int!
+}
+
+type Paquete {
+  vuelo: Vuelo!
+  hotel: Hotel!
+  auto: Auto!
+  noches: Int!
+  totalCop: Int!
+}
+
+"Oferta con inventario para un viaje. Cada lista viene ordenada por precio."
+type Disponibilidad {
+  vuelos(limite: Int = 10): [Vuelo!]!
+  hoteles(limite: Int = 10): [Hotel!]!
+  autos(limite: Int = 10): [Auto!]!
+  "La combinación más barata de vuelo, hotel y auto; null si falta alguno."
+  paqueteMasEconomico: Paquete
+}
+
+enum EstadoOrden {
+  PENDIENTE
+  CONFIRMADA
+  COMPENSANDO
+  CANCELADA
+}
+
+enum PasoSaga {
+  VUELO
+  HOTEL
+  AUTO
+  PAGO
+}
+
+type RegistroSaga {
+  paso: PasoSaga!
+  "ACCION o COMPENSACION"
+  tipo: String!
+  "OK o FALLO"
+  estado: String!
+  detalle: String
+  creadoEn: DateTime!
+}
+
+type Orden {
+  id: ID!
+  estado: EstadoOrden!
+  totalCop: Int!
+  motivoFallo: String
+  fechaInicio: Date!
+  fechaFin: Date!
+  pasajeros: Int!
+  vuelo: Vuelo!
+  hotel: Hotel!
+  auto: Auto!
+  estadoPago: String
+  "Bitácora de la SAGA: cada paso y cada compensación."
+  pasos: [RegistroSaga!]!
+  "Enlace a la ejecución de la SAGA en el panel de Prefect."
+  urlPrefect: String
+  creadoEn: DateTime!
+}
+
+type Usuario {
+  id: ID!
+  email: String!
+  nombre: String!
+}
+
+input ReservaInput {
+  vueloId: ID!
+  hotelId: ID!
+  autoId: ID!
+  fechaInicio: Date!
+  fechaFin: Date!
+  pasajeros: Int = 1
+  "La genera el cliente una vez por intento de compra; un doble clic no crea dos órdenes."
+  claveIdempotencia: ID!
+  "Solo para la demostración: obliga a fallar ese paso y dispara las compensaciones."
+  simularFalloEn: PasoSaga
+}
+
+type Query {
+  destinos: [String!]!
+  disponibilidad(destino: String!, fechaInicio: Date!, fechaFin: Date!, pasajeros: Int = 1): Disponibilidad!
+  "Usuario con sesión iniciada; null si no hay sesión."
+  me: Usuario
+  orden(id: ID!): Orden
+  misOrdenes: [Orden!]!
+}
+
+type Mutation {
+  registrar(email: String!, nombre: String!, contrasena: String!): Usuario!
+  iniciarSesion(email: String!, contrasena: String!): Usuario!
+  cerrarSesion: Boolean!
+  reservarPaquete(input: ReservaInput!): Orden!
+}

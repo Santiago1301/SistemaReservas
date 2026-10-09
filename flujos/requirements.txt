@@ -1,0 +1,18 @@
+# Orquestación y observabilidad
+prefect==3.8.8
+prefect-dask==0.3.7
+
+# Computación distribuida (bokeh dibuja el panel web de Dask)
+dask[distributed]==2026.8.0
+bokeh==3.10.0
+
+# Scraping: debe coincidir con la versión de la imagen base
+playwright==1.63.0
+
+# Conexión a PostgreSQL (Supabase)
+psycopg[binary]==3.3.6
+
+# Viene preinstalado en la imagen base de Playwright en una versión que pip-audit
+# señaló como vulnerable (PYSEC-2026-4011 a 4014); se sube a una corregida.
+# Evidencia en docs/seguridad/auditoria.
+virtualenv>=21.7.13

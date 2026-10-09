@@ -1,0 +1,8 @@
+Auditoría de dependencias Node · proyecto: gateway · fecha: 2026-10-09T00:03Z
+Herramienta: npm 10.9.3 · paquetes en package-lock.json: 157
+
+--- npm audit (todas las dependencias) ---
+found 0 vulnerabilities
+
+--- npm audit --omit=dev (solo las que llegan a producción) ---
+found 0 vulnerabilities
